@@ -8,78 +8,197 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.json({
-    message: "Smart Agriculture Backend Running",
-  });
+const { GoogleGenAI } = require("@google/genai");
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
 });
 
-app.get("/db-test", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json({
-      success: true,
-      message: "PostgreSQL Connected",
-      time: result.rows[0],
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      success: false,
-      message: "Database connection failed",
-    });
+// Sleep Helper
+const sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// Gemini Diagnosis with Retry + Fallback
+async function generateDiagnosis(requestData) {
+  const models = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+  ];
+
+  let lastError = null;
+  for (const model of models) {
+    const maxRetries = 2;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(
+          `Gemini ${model} - attempt ${attempt}`
+        );
+        const response = await ai.models.generateContent({
+          ...requestData,
+          model,
+        });
+        console.log(
+          `Gemini diagnosis successful with: ${model}`
+        );
+        return response;
+      } catch (error) {
+        lastError = error;
+
+        console.error(
+          `Gemini ${model} attempt ${attempt} failed:`,
+          error.message
+        );
+
+        // 429 - Quota / Rate Limit
+        if (error.status === 429) {
+          console.log(
+            `${model} returned 429. Moving to fallback model...`
+          );
+
+          // একই model-এ আবার retry করার দরকার নেই
+          break;
+        }
+
+        // 503 - Model Temporarily Busy
+        if (error.status === 503) {
+          if (attempt === maxRetries) {
+            console.log(
+              `${model} is still busy. Moving to fallback model...`
+            );
+
+            break;
+          }
+
+          // 1.5 sec → 3 sec
+          const delay =
+            1500 * Math.pow(2, attempt - 1);
+
+          console.log(
+            `Retrying ${model} in ${
+              delay / 1000
+            } seconds...`
+          );
+
+          await sleep(delay);
+
+          continue;
+        }
+
+        // Other Errors
+        throw error;
+      }
+    }
   }
-});
 
-// Gemini API Diagnose Route
+  // সব model ব্যর্থ হলে
+  throw (
+    lastError ||
+    new Error("All Gemini models failed")
+  );
+}
+
+// AI Crop Disease Diagnosis
 app.post("/api/diagnose", async (req, res) => {
   try {
-    const { imageUrl, language = "bn" } = req.body;
+    const {
+      imageUrl,
+      language = "bn",
+    } = req.body;
+
+    // Validate Image URL
     if (!imageUrl) {
       return res.status(400).json({
         success: false,
         message: "Image URL is required",
       });
     }
-    // Gemini SDK
-    const { GoogleGenAI } = await import("@google/genai");
 
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-    });
-    // Cloudinary image download
-const imageResponse = await fetch(imageUrl);
+    // Cloudinary Image Optimization
+    const fastImageUrl = imageUrl.replace(
+      "/upload/",
+      "/upload/w_600,q_auto,f_jpg/"
+    );
 
-if (!imageResponse.ok) {
-  throw new Error("Could not download image from Cloudinary");
-}
-const imageBuffer = Buffer.from(
-  await imageResponse.arrayBuffer()
-);
-// Image MIME type
-const mimeType =
-  imageResponse.headers.get("content-type") || "image/jpeg";
+    console.log(
+      "Optimized image URL:",
+      fastImageUrl
+    );
 
-// Convert image to Base64
-const base64Image = imageBuffer.toString("base64");
-    // 2. JSON Schema
+    // Download Optimized Image
+    const imageResponse = await fetch(
+      fastImageUrl
+    );
+
+    if (!imageResponse.ok) {
+      throw new Error(
+        "Could not download image from Cloudinary"
+      );
+    }
+
+    // Convert Image → Buffer → Base64
+    const imageBuffer = Buffer.from(
+      await imageResponse.arrayBuffer()
+    );
+
+    const mimeType = "image/jpeg";
+
+    const base64Image =
+      imageBuffer.toString("base64");
+
+
+    // Response Language
+    const responseLanguage =
+      language === "bn"
+        ? "Bengali (Bangla)"
+        : "English";
+
+
+    // AI Prompt
+    const prompt = `
+You are an expert agricultural plant pathologist.
+
+Analyze the provided crop leaf image carefully.
+
+Your tasks:
+
+1. Identify the crop/plant if possible.
+2. Identify the most likely disease or condition.
+3. If the plant appears healthy, clearly say that it is healthy.
+4. Do not invent symptoms that are not visible or reasonably inferable.
+5. Provide a confidence score from 0 to 100.
+6. List visible symptoms.
+7. Provide practical organic treatment.
+8. Provide chemical treatment when appropriate.
+9. Provide prevention recommendations.
+10. Return ONLY the requested JSON structure.
+11. Do not use Markdown.
+12. Do not add explanations outside JSON.
+13. Every human-readable value must be written in ${responseLanguage}.
+
+The response language is ${responseLanguage}.
+`;
+
+    // JSON Response Schema
     const responseSchema = {
       type: "object",
 
       properties: {
         disease: {
           type: "string",
-          description: "Most likely crop disease name",
+          description:
+            "Most likely crop disease or condition",
         },
 
         scientificName: {
           type: "string",
-          description: "Scientific name of the disease or pathogen",
+          description:
+            "Scientific name of the disease or pathogen",
         },
 
         confidence: {
           type: "number",
-          description: "Confidence score from 0 to 100",
+          description:
+            "Confidence score from 0 to 100",
         },
 
         symptoms: {
@@ -87,7 +206,8 @@ const base64Image = imageBuffer.toString("base64");
           items: {
             type: "string",
           },
-          description: "Visible symptoms detected in the image",
+          description:
+            "Visible symptoms detected in the image",
         },
 
         organicTreatment: {
@@ -95,7 +215,8 @@ const base64Image = imageBuffer.toString("base64");
           items: {
             type: "string",
           },
-          description: "Recommended organic treatment methods",
+          description:
+            "Recommended organic treatment methods",
         },
 
         chemicalTreatment: {
@@ -103,7 +224,8 @@ const base64Image = imageBuffer.toString("base64");
           items: {
             type: "string",
           },
-          description: "Recommended chemical treatment methods",
+          description:
+            "Recommended chemical treatment methods",
         },
 
         prevention: {
@@ -111,9 +233,11 @@ const base64Image = imageBuffer.toString("base64");
           items: {
             type: "string",
           },
-          description: "Disease prevention recommendations",
+          description:
+            "Disease prevention recommendations",
         },
       },
+
       required: [
         "disease",
         "scientificName",
@@ -124,43 +248,19 @@ const base64Image = imageBuffer.toString("base64");
         "prevention",
       ],
     };
-    // 3. Prompt
-const responseLanguage =
-  language === "bn"
-    ? "Bengali (Bangla)"
-    : "English";
 
-const prompt = `
-You are an expert agricultural plant pathologist.
-Analyze the provided crop leaf image carefully.
-Identify the most likely disease affecting the plant.
-Important instructions:
-1. Identify the crop if possible.
-2. Identify the most likely disease or condition.
-3. If the plant appears healthy, clearly indicate that it is healthy.
-4. Do not invent symptoms that are not visible or reasonably inferable.
-5. Give a confidence score between 0 and 100.
-6. Provide practical treatment recommendations.
-7. Provide organic treatment options.
-8. Provide chemical treatment options when appropriate.
-9. Provide prevention recommendations.
-10. Return ONLY the JSON structure.
-11. Do not use Markdown.
-12. Do not add explanations outside the JSON.
-13. Every human-readable value inside the JSON MUST be written in ${responseLanguage}.
-The response language is ${responseLanguage}.
-Return the result according to the provided JSON schema.
-`;
-    // 4. Gemini Multimodal Request
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    // Gemini Request
+    const response = await generateDiagnosis({
+
       contents: [
         {
           role: "user",
+
           parts: [
             {
               text: prompt,
             },
+
             {
               inlineData: {
                 mimeType,
@@ -170,31 +270,106 @@ Return the result according to the provided JSON schema.
           ],
         },
       ],
-      // 5. Structured JSON Response
+
       config: {
         responseMimeType: "application/json",
         responseSchema,
       },
+
     });
-    // 6. Convert AI JSON string → JS object
-    const diagnosis = JSON.parse(response.text);
-    console.log("AI Diagnosis:", diagnosis);
-    // 7. Send result to frontend
-    res.json({
+
+    // Parse AI Response
+    const diagnosis =
+      JSON.parse(response.text);
+
+
+    console.log(
+      "AI Diagnosis:",
+      diagnosis
+    );
+
+    // Send Response
+    return res.json({
       success: true,
       result: diagnosis,
     });
+
   } catch (error) {
-    console.error("Gemini Diagnosis Error:", error);
-    res.status(500).json({
+    console.error(
+      "Gemini Diagnosis Error:",
+      error
+    );
+    // 429 - Quota Exceeded
+    if (error.status === 429) {
+      return res.status(429).json({
+        success: false,
+
+        message:
+          "AI diagnosis limit has been reached. Please try again later.",
+      });
+    }
+    // 503 - All Models Busy
+    if (error.status === 503) {
+      return res.status(503).json({
+        success: false,
+
+        message:
+          "AI service is temporarily busy. Please try again in a moment.",
+      });
+    }
+    // Other Errors
+    return res.status(500).json({
       success: false,
-      message: "Diagnosis failed",
-      error: error.message,
+
+      message:
+        "Diagnosis failed",
+
+      error:
+        error.message,
     });
   }
 });
-const PORT = process.env.PORT || 5000;
+
+// Existing Routes
+app.get("/", (req, res) => {
+  res.json({
+    message:
+      "Smart Agriculture Backend Running",
+  });
+});
+
+
+app.get("/db-test", async (req, res) => {
+  try {
+    const result =
+      await pool.query("SELECT NOW()");
+
+    res.json({
+      success: true,
+      message:
+        "PostgreSQL Connected",
+
+      time:
+        result.rows[0],
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message:
+        "Database connection failed",
+    });
+  }
+});
+
+const PORT =
+  process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(
+    `Server running on port ${PORT}`
+  );
 });
