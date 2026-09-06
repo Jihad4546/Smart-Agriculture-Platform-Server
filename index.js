@@ -55,11 +55,9 @@ async function generateDiagnosis(requestData) {
             `${model} returned 429. Moving to fallback model...`
           );
 
-          // একই model-এ আবার retry করার দরকার নেই
           break;
         }
 
-        // 503 - Model Temporarily Busy
         if (error.status === 503) {
           if (attempt === maxRetries) {
             console.log(
@@ -84,13 +82,11 @@ async function generateDiagnosis(requestData) {
           continue;
         }
 
-        // Other Errors
         throw error;
       }
     }
   }
 
-  // সব model ব্যর্থ হলে
   throw (
     lastError ||
     new Error("All Gemini models failed")
@@ -361,6 +357,55 @@ app.get("/db-test", async (req, res) => {
       success: false,
       message:
         "Database connection failed",
+    });
+  }
+});
+// Weather API
+app.get("/api/weather", async (req, res) => {
+  try {
+    const city = req.query.city || "Dhaka";
+    const language = req.query.lang === "bn" ? "bn" : "en";
+
+    const url = new URL(
+      "https://api.weatherapi.com/v1/forecast.json"
+    );
+
+    url.searchParams.set(
+      "key",
+      process.env.WEATHER_API_KEY
+    );
+
+    url.searchParams.set("q", city);
+
+    // Free plan: maximum 3-day forecast
+    url.searchParams.set("days", "3");
+
+    url.searchParams.set("aqi", "no");
+    url.searchParams.set("alerts", "yes");
+    url.searchParams.set("lang", language);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        success: false,
+        message:
+          data?.error?.message ||
+          "Failed to fetch weather data",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("Weather API Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch weather data",
     });
   }
 });
