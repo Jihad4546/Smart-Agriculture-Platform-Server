@@ -21,8 +21,8 @@ const sleep = (ms) =>
 // Gemini Diagnosis with Retry + Fallback
 async function generateDiagnosis(requestData) {
   const models = [
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
   ];
 
   let lastError = null;
@@ -66,8 +66,6 @@ async function generateDiagnosis(requestData) {
 
             break;
           }
-
-          // 1.5 sec → 3 sec
           const delay =
             1500 * Math.pow(2, attempt - 1);
 
@@ -76,12 +74,9 @@ async function generateDiagnosis(requestData) {
               delay / 1000
             } seconds...`
           );
-
           await sleep(delay);
-
           continue;
         }
-
         throw error;
       }
     }
@@ -112,7 +107,7 @@ app.post("/api/diagnose", async (req, res) => {
     // Cloudinary Image Optimization
     const fastImageUrl = imageUrl.replace(
       "/upload/",
-      "/upload/w_600,q_auto,f_jpg/"
+      "/upload/w_600,q_auto,f_auto/"
     );
 
     console.log(
@@ -136,11 +131,10 @@ app.post("/api/diagnose", async (req, res) => {
       await imageResponse.arrayBuffer()
     );
 
-    const mimeType = "image/jpeg";
+    const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
 
     const base64Image =
       imageBuffer.toString("base64");
-
 
     // Response Language
     const responseLanguage =
@@ -278,7 +272,6 @@ The response language is ${responseLanguage}.
     const diagnosis =
       JSON.parse(response.text);
 
-
     console.log(
       "AI Diagnosis:",
       diagnosis
@@ -333,7 +326,6 @@ app.get("/", (req, res) => {
       "Smart Agriculture Backend Running",
   });
 });
-
 
 app.get("/db-test", async (req, res) => {
   try {
