@@ -318,7 +318,200 @@ The response language is ${responseLanguage}.
     });
   }
 });
+//AI Soil Analysis
+app.post("/api/soil", async (req, res) => {
+  try {
+    const {
+      imageUrl,
+      language = "bn",
+    } = req.body;
 
+    if (!imageUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "Image URL is required",
+      });
+    }
+
+    const fastImageUrl = imageUrl.replace(
+      "/upload/",
+      "/upload/w_600,q_auto,f_auto/"
+    );
+
+    console.log(
+      "Optimized image URL:",
+      fastImageUrl
+    );
+
+    const imageResponse = await fetch(
+      fastImageUrl
+    );
+
+    if (!imageResponse.ok) {
+      throw new Error(
+        "Could not download image from Cloudinary"
+      );
+    }
+
+    const imageBuffer = Buffer.from(
+      await imageResponse.arrayBuffer()
+    );
+
+    const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
+
+    const base64Image =
+      imageBuffer.toString("base64");
+
+    const responseLanguage =
+      language === "bn"
+        ? "Bengali (Bangla)"
+        : "English";
+
+    const prompt = `
+You are an expert soil scientist and agricultural chemist.
+
+Analyze the provided image of soil carefully.
+
+Your tasks:
+1. Identify the soil type (e.g., Clay, Sandy, Loamy, Silt, Peat, Chalky).
+2. Estimate soil health indicators (texture, moisture, organic matter level, color).
+3. Estimate approximate pH range and NPK (Nitrogen, Phosphorus, Potassium) status based on visual characteristics.
+4. Recommend suitable crops or plants for this soil type.
+5. Provide actionable recommendations to improve soil fertility and structure.
+6. Provide a confidence score from 0 to 100.
+7. Return ONLY the requested JSON structure.
+8. Do not use Markdown.
+9. Do not add explanations outside JSON.
+10. Every human-readable value must be written in ${responseLanguage}.
+
+The response language is ${responseLanguage}.
+`;
+
+    const responseSchema = {
+      type: "object",
+      properties: {
+        soilType: {
+          type: "string",
+          description: "Primary category or type of the soil",
+        },
+        confidence: {
+          type: "number",
+          description: "Confidence score from 0 to 100",
+        },
+        estimatedpH: {
+          type: "string",
+          description: "Estimated pH range (e.g., 6.0 - 6.5)",
+        },
+        moistureLevel: {
+          type: "string",
+          description: "Visual moisture condition (e.g., Dry, Moist, Waterlogged)",
+        },
+        organicMatterContent: {
+          type: "string",
+          description: "Estimated organic matter content (e.g., Low, Medium, High)",
+        },
+        suitableCrops: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+          description: "List of crops suitable for this soil",
+        },
+        soilImprovements: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+          description: "Recommended organic/fertilizer actions to improve soil quality",
+        },
+        characteristics: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+          description: "Key visual features observed (color, texture, compaction)",
+        },
+      },
+      required: [
+        "soilType",
+        "confidence",
+        "estimatedpH",
+        "moistureLevel",
+        "organicMatterContent",
+        "suitableCrops",
+        "soilImprovements",
+        "characteristics",
+      ],
+    };
+
+    const response = await generateDiagnosis({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: prompt,
+            },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Image,
+              },
+            },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema,
+      },
+
+    });
+
+    const soil =
+      JSON.parse(response.text);
+
+    console.log(
+      "AI Soil Analysis:",
+      soil
+    );
+
+    return res.json({
+      success: true,
+      result: soil,
+    });
+
+  } catch (error) {
+    console.error(
+      "Gemini Soil Analysis Error:",
+      error
+    );
+  
+    if (error.status === 429) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "AI soil analysis limit has been reached. Please try again later.",
+      });
+    }
+    if (error.status === 503) {
+      return res.status(503).json({
+        success: false,
+
+        message:
+          "AI service is temporarily busy. Please try again in a moment.",
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message:
+        "Soil analysis failed",
+
+      error:
+        error.message,
+    });
+  }
+});
 // Weather API
 app.get("/api/weather", async (req, res) => {
   try {
