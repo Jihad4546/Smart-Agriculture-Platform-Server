@@ -37,6 +37,54 @@ const initDb = async () => {
         characteristics JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+    id SERIAL PRIMARY KEY,
+
+    farmer_id TEXT NOT NULL,
+    expert_id TEXT NOT NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_conversation_farmer
+        FOREIGN KEY (farmer_id)
+        REFERENCES "user"(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_conversation_expert
+        FOREIGN KEY (expert_id)
+        REFERENCES "user"(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT unique_farmer_expert
+        UNIQUE (farmer_id, expert_id)
+);
+CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+
+    conversation_id INTEGER NOT NULL,
+
+    sender_id TEXT NOT NULL,
+
+    sender_role TEXT NOT NULL
+        CHECK (sender_role IN ('farmer', 'expert')),
+
+    message TEXT NOT NULL,
+     image_url TEXT,
+   
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_message_conversation
+        FOREIGN KEY (conversation_id)
+        REFERENCES conversations(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_message_sender
+        FOREIGN KEY (sender_id)
+        REFERENCES "user"(id)
+        ON DELETE CASCADE
+);
   `;
 
   try {

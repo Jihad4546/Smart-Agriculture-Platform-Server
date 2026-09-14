@@ -69,7 +69,6 @@ app.get("/user/:email", async (req, res) => {
   }
 });
 
-
 app.patch("/user/:email", async (req, res) => {
   try {
     const { email } = req.params;
@@ -78,12 +77,10 @@ app.patch("/user/:email", async (req, res) => {
 
     const updates = {};
 
-    // Name পাঠানো হলে শুধু name update হবে
     if (name !== undefined) {
       updates.name = name;
     }
 
-    // Image পাঠানো হলে শুধু image update হবে
     if (image !== undefined) {
       updates.image = image;
     }
@@ -103,7 +100,6 @@ app.patch("/user/:email", async (req, res) => {
 
     const values = Object.values(updates);
 
-    // email WHERE condition-এর জন্য
     values.push(email);
 
     const query = `
@@ -628,6 +624,7 @@ app.get("/api/weather", async (req, res) => {
 const http = require("http");
 const { Server } = require("socket.io");
 const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -635,13 +632,254 @@ const io = new Server(server, {
   },
 });
 
+async function getOrCreateConversation(farmerId, expertId) {
+  const result = await pool.query(
+    `
+    INSERT INTO conversations (farmer_id, expert_id)
+    VALUES ($1, $2)
+
+    ON CONFLICT (farmer_id, expert_id)
+    DO UPDATE SET updated_at = NOW()
+
+    RETURNING id
+    `,
+    [farmerId, expertId]
+  );
+
+  return result.rows[0].id;
+}
+
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
+
+  socket.on("join_room", async (data) => {
+    try {
+      const {
+        roomId,
+        farmerId,
+        expertId,
+      } = data;
+
+      console.log("Join room data:", {
+        roomId,
+        farmerId,
+        expertId,
+      });
+
+      // Validate IDs
+      if (!roomId || !farmerId || !expertId) {
+        console.log("Invalid join room data");
+
+        return;
+      }
+
+      const conversationId = await getOrCreateConversation(farmerId, expertId);
+
+      socket.join(roomId);
+
+      socket.data.conversationId = conversationId;
+
+      socket.data.farmerId = farmerId;
+
+      socket.data.expertId = expertId;
+
+      console.log(
+        `Socket ${socket.id} joined room ${roomId}`
+      );
+
+      console.log(
+        "Conversation ID:",
+        conversationId
+      );
+
+    } catch (error) {
+      console.error(
+        "Join room error:",
+        error
+      );
+    }
+  });
+
+socket.on("send_message", async (messageData) => {
+  try {
+    const { roomId, sender, senderId, message, image } = messageData;
+
+    const cleanedMessage = typeof message === "string" ? message.trim() : "";
+    const hasText = cleanedMessage.length > 0;
+    const hasImage = Boolean(image);
+
+    if (!roomId || !senderId || (!hasText && !hasImage)) {
+      return;
+    }
+
+    const conversationId = socket.data.conversationId;
+
+    if (!conversationId) {
+      console.log("Conversation not found");
+      return;
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO messages
+      (
+        conversation_id,
+        sender_id,
+        sender_role,
+        message,
+        image_url
+      )
+      VALUES
+      ($1, $2, $3, $4, $5)
+      RETURNING
+        id,
+        conversation_id,
+        sender_id,
+        sender_role,
+        message,
+        image_url,
+        created_at
+      `,
+      [
+        conversationId,
+        senderId,
+        sender,
+        cleanedMessage, // null না পাঠিয়ে পরিষ্কার করা টেক্সট (অথবা ফাঁকা স্ট্রিং "") পাঠানো হচ্ছে
+        image || null,
+      ]
+    );
+
+    const savedMessage = result.rows[0];
+
+    io.to(roomId).emit("receive_message", {
+      id: savedMessage.id,
+      sender: savedMessage.sender_role,
+      senderId: savedMessage.sender_id,
+      message: savedMessage.message,
+      imageUrl: savedMessage.image_url,
+      conversationId: savedMessage.conversation_id,
+      createdAt: savedMessage.created_at,
+    });
+
+    await pool.query(
+      `
+      UPDATE conversations
+      SET updated_at = NOW()
+      WHERE id = $1
+      `,
+      [conversationId]
+    );
+  } catch (error) {
+    console.error("Save message error:", error);
+  }
+});
+
   socket.on("disconnect", () => {
-    console.log("A user disconnected:", socket.id);
+    console.log(
+      "A user disconnected:",
+      socket.id
+    );
   });
 });
 
+app.get("/api/experts", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, email, image
+      FROM "user"
+      WHERE role = 'expert'
+      AND status = 'active'
+      ORDER BY name ASC
+    `);
+
+    res.json({
+      success: true,
+      experts: result.rows,
+    });
+  } catch (error) {
+    console.error("Get experts error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to get experts",
+    });
+  }
+});
+
+app.get("/api/farmers", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, email, image
+      FROM "user"
+      WHERE role = 'farmer'
+      AND status = 'active'
+      ORDER BY name ASC
+    `);
+
+    res.json({
+      success: true,
+      farmers: result.rows,
+    });
+  } catch (error) {
+    console.error("Get farmers error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to get farmers",
+    });
+  }
+});
+app.get(
+  "/api/conversations/:farmerId/:expertId/messages",
+  async (req, res) => {
+    try {
+      const {
+        farmerId,
+        expertId,
+      } = req.params;
+
+      const result = await pool.query(
+        `
+        SELECT
+          m.id,
+          m.conversation_id,
+          m.sender_id,
+          m.sender_role,
+          m.message,
+           m.image_url,
+          m.created_at
+        FROM messages m
+
+        INNER JOIN conversations c
+          ON m.conversation_id = c.id
+
+        WHERE c.farmer_id = $1
+          AND c.expert_id = $2
+
+        ORDER BY m.created_at ASC
+        `,
+        [farmerId, expertId]
+      );
+
+      res.json({
+        success: true,
+        messages: result.rows,
+      });
+
+    } catch (error) {
+      console.error(
+        "Chat history error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to fetch chat history",
+      });
+    }
+  }
+);
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
