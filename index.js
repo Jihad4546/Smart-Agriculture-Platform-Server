@@ -636,32 +636,25 @@ const io = new Server(server, {
 const onlineUsers = new Map();
 
 const addUserSocket = (userId, socketId) => {
-  if (!userId || !socketId) return;
+  if (!userId || !socketId) return false;
+
+  let becameOnline = false;
 
   if (!onlineUsers.has(userId)) {
     onlineUsers.set(userId, new Set());
+    becameOnline = true;
   }
 
   onlineUsers.get(userId).add(socketId);
-
-  console.log("ONLINE USERS:");
-
-  for (const [id, sockets] of onlineUsers.entries()) {
-    console.log(
-      id,
-      "sockets:",
-      sockets.size
-    );
-  }
+  return becameOnline;
 };
-
 const removeUserSocket = (userId, socketId) => {
   if (!userId || !socketId) {
     return false;
   }
 
   const sockets = onlineUsers.get(userId);
-
+ 
   if (!sockets) {
     return false;
   }
@@ -698,7 +691,6 @@ async function getOrCreateConversation(
       farmer_id,
       expert_id
     )
-
     DO UPDATE SET
       updated_at = NOW()
 
@@ -728,14 +720,9 @@ socket.on("user_online", (data) => {
   socket.data.userId = userId;
   socket.data.role = role;
 
-  const becameOnline = addUserSocket(
-    userId,
-    socket.id
-  );
+  const becameOnline = addUserSocket(userId, socket.id);
 
-  console.log(
-    `User online: ${userId} (${role})`
-  );
+  console.log(`User online: ${userId} (${role})`);
 
   if (becameOnline) {
     io.emit("user_status", {
@@ -746,117 +733,33 @@ socket.on("user_online", (data) => {
   }
 });
 
-  socket.on(
-    "join_room",
-    async (data) => {
+  socket.on("join_room", async (data) => {
+  try {
+    const { roomId, farmerId, expertId, userId, role } = data || {};
 
-      try {
-
-        const {
-          roomId,
-          farmerId,
-          expertId,
-          userId,
-          role,
-        } = data || {};
-
-        console.log(
-          "Join room data:",
-          {
-            roomId,
-            farmerId,
-            expertId,
-            userId,
-            role,
-          }
-        );
-
-        if (
-          !roomId ||
-          !farmerId ||
-          !expertId ||
-          !userId
-        ) {
-          console.log(
-            "Invalid join room data"
-          );
-
-          return;
-        }
-
-        socket.userId = userId;
-        socket.role = role;
-
-        const conversationId =
-          await getOrCreateConversation(
-            farmerId,
-            expertId
-          );
-
-
-        socket.join(roomId);
-
-        socket.data.userId = userId;
-        socket.data.role = role;
-
-        socket.data.conversationId =
-          conversationId;
-
-        socket.data.farmerId =
-          farmerId;
-
-        socket.data.expertId =
-          expertId;
-
-        socket.data.senderId =
-          userId;
-
-        const wasOffline =
-          !isUserOnline(userId);
-
-        addUserSocket(
-          userId,
-          socket.id
-        );
-
-
-        console.log(
-          `Socket ${socket.id} joined room ${roomId}`
-        );
-
-        console.log(
-          "Conversation ID:",
-          conversationId
-        );
-
-        if (wasOffline) {
-
-          io.emit(
-            "user_status",
-            {
-              userId,
-              status: "online",
-              role,
-            }
-          );
-
-          console.log(
-            "Broadcast ONLINE from join_room:",
-            userId
-          );
-        }
-
-      } catch (error) {
-
-        console.error(
-          "Join room error:",
-          error
-        );
-
-      }
-
+    if (!roomId || !farmerId || !expertId || !userId) {
+      return;
     }
-  );
+
+    socket.userId = userId;
+    socket.role = role;
+
+    const conversationId = await getOrCreateConversation(farmerId, expertId);
+
+    socket.join(roomId);
+
+    socket.data.userId = userId;
+    socket.data.role = role;
+    socket.data.conversationId = conversationId;
+    socket.data.farmerId = farmerId;
+    socket.data.expertId = expertId;
+    socket.data.senderId = userId;
+
+    console.log(`Socket ${socket.id} joined room ${roomId}`);
+  } catch (error) {
+    console.error("Join room error:", error);
+  }
+});
 
   socket.on(
     "send_message",
@@ -872,19 +775,16 @@ socket.on("user_online", (data) => {
           image,
         } = messageData || {};
 
-
         const cleanedMessage =
           typeof message === "string"
             ? message.trim()
             : "";
-
 
         const hasText =
           cleanedMessage.length > 0;
 
         const hasImage =
           Boolean(image);
-
 
         if (
           !roomId ||
@@ -894,10 +794,8 @@ socket.on("user_online", (data) => {
           return;
         }
 
-
         const conversationId =
           socket.data.conversationId;
-
 
         if (!conversationId) {
 
@@ -996,23 +894,16 @@ socket.on("user_online", (data) => {
           error
         );
 
-      }
-
-    }
-  );
-
+      }});
 
   socket.on(
     "delete_message",
     async (data) => {
-
       try {
-
         const {
           messageId,
           roomId,
         } = data || {};
-
 
         if (
           !messageId ||
@@ -1020,7 +911,6 @@ socket.on("user_online", (data) => {
         ) {
           return;
         }
-
 
         const conversationId =
           socket.data.conversationId;
@@ -1032,7 +922,6 @@ socket.on("user_online", (data) => {
           !conversationId ||
           !senderId
         ) {
-
           console.log(
             "Conversation or sender not found"
           );
@@ -1044,13 +933,9 @@ socket.on("user_online", (data) => {
           await pool.query(
             `
             DELETE FROM messages
-
             WHERE id = $1
-
               AND conversation_id = $2
-
               AND sender_id = $3
-
             RETURNING id
             `,
             [
