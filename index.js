@@ -623,6 +623,7 @@ app.get("/api/weather", async (req, res) => {
 
 const http = require("http");
 const { Server } = require("socket.io");
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -632,155 +633,534 @@ const io = new Server(server, {
   },
 });
 
-async function getOrCreateConversation(farmerId, expertId) {
+const onlineUsers = new Map();
+
+const addUserSocket = (userId, socketId) => {
+  if (!userId || !socketId) return;
+
+  if (!onlineUsers.has(userId)) {
+    onlineUsers.set(userId, new Set());
+  }
+
+  onlineUsers.get(userId).add(socketId);
+
+  console.log("ONLINE USERS:");
+
+  for (const [id, sockets] of onlineUsers.entries()) {
+    console.log(
+      id,
+      "sockets:",
+      sockets.size
+    );
+  }
+};
+
+const removeUserSocket = (userId, socketId) => {
+  if (!userId || !socketId) {
+    return false;
+  }
+
+  const sockets = onlineUsers.get(userId);
+
+  if (!sockets) {
+    return false;
+  }
+
+  sockets.delete(socketId);
+
+  if (sockets.size === 0) {
+    onlineUsers.delete(userId);
+
+    return true;
+  }
+  return false;
+};
+
+const isUserOnline = (userId) => {
+  return onlineUsers.has(userId);
+};
+
+async function getOrCreateConversation(
+  farmerId,
+  expertId
+) {
   const result = await pool.query(
     `
-    INSERT INTO conversations (farmer_id, expert_id)
+    INSERT INTO conversations
+    (
+      farmer_id,
+      expert_id
+    )
     VALUES ($1, $2)
 
-    ON CONFLICT (farmer_id, expert_id)
-    DO UPDATE SET updated_at = NOW()
+    ON CONFLICT
+    (
+      farmer_id,
+      expert_id
+    )
+
+    DO UPDATE SET
+      updated_at = NOW()
 
     RETURNING id
     `,
-    [farmerId, expertId]
+    [
+      farmerId,
+      expertId,
+    ]
   );
 
   return result.rows[0].id;
 }
 
 io.on("connection", (socket) => {
-  console.log("A user connected:", socket.id);
 
-  socket.on("join_room", async (data) => {
-    try {
-      const {
-        roomId,
-        farmerId,
-        expertId,
-      } = data;
+  console.log(
+    "Socket connected:",
+    socket.id
+  );
 
-      console.log("Join room data:", {
-        roomId,
-        farmerId,
-        expertId,
-      });
+socket.on("user_online", (data) => {
+  const { userId, role } = data || {};
 
-      // Validate IDs
-      if (!roomId || !farmerId || !expertId) {
-        console.log("Invalid join room data");
+  if (!userId) return;
 
-        return;
-      }
+  socket.data.userId = userId;
+  socket.data.role = role;
 
-      const conversationId = await getOrCreateConversation(farmerId, expertId);
+  const becameOnline = addUserSocket(
+    userId,
+    socket.id
+  );
 
-      socket.join(roomId);
+  console.log(
+    `User online: ${userId} (${role})`
+  );
 
-      socket.data.conversationId = conversationId;
-
-      socket.data.farmerId = farmerId;
-
-      socket.data.expertId = expertId;
-
-      console.log(
-        `Socket ${socket.id} joined room ${roomId}`
-      );
-
-      console.log(
-        "Conversation ID:",
-        conversationId
-      );
-
-    } catch (error) {
-      console.error(
-        "Join room error:",
-        error
-      );
-    }
-  });
-
-socket.on("send_message", async (messageData) => {
-  try {
-    const { roomId, sender, senderId, message, image } = messageData;
-
-    const cleanedMessage = typeof message === "string" ? message.trim() : "";
-    const hasText = cleanedMessage.length > 0;
-    const hasImage = Boolean(image);
-
-    if (!roomId || !senderId || (!hasText && !hasImage)) {
-      return;
-    }
-
-    const conversationId = socket.data.conversationId;
-
-    if (!conversationId) {
-      console.log("Conversation not found");
-      return;
-    }
-
-    const result = await pool.query(
-      `
-      INSERT INTO messages
-      (
-        conversation_id,
-        sender_id,
-        sender_role,
-        message,
-        image_url
-      )
-      VALUES
-      ($1, $2, $3, $4, $5)
-      RETURNING
-        id,
-        conversation_id,
-        sender_id,
-        sender_role,
-        message,
-        image_url,
-        created_at
-      `,
-      [
-        conversationId,
-        senderId,
-        sender,
-        cleanedMessage, // null না পাঠিয়ে পরিষ্কার করা টেক্সট (অথবা ফাঁকা স্ট্রিং "") পাঠানো হচ্ছে
-        image || null,
-      ]
-    );
-
-    const savedMessage = result.rows[0];
-
-    io.to(roomId).emit("receive_message", {
-      id: savedMessage.id,
-      sender: savedMessage.sender_role,
-      senderId: savedMessage.sender_id,
-      message: savedMessage.message,
-      imageUrl: savedMessage.image_url,
-      conversationId: savedMessage.conversation_id,
-      createdAt: savedMessage.created_at,
+  if (becameOnline) {
+    io.emit("user_status", {
+      userId,
+      status: "online",
+      role,
     });
-
-    await pool.query(
-      `
-      UPDATE conversations
-      SET updated_at = NOW()
-      WHERE id = $1
-      `,
-      [conversationId]
-    );
-  } catch (error) {
-    console.error("Save message error:", error);
   }
 });
 
-  socket.on("disconnect", () => {
-    console.log(
-      "A user disconnected:",
-      socket.id
-    );
-  });
+  socket.on(
+    "join_room",
+    async (data) => {
+
+      try {
+
+        const {
+          roomId,
+          farmerId,
+          expertId,
+          userId,
+          role,
+        } = data || {};
+
+        console.log(
+          "Join room data:",
+          {
+            roomId,
+            farmerId,
+            expertId,
+            userId,
+            role,
+          }
+        );
+
+        if (
+          !roomId ||
+          !farmerId ||
+          !expertId ||
+          !userId
+        ) {
+          console.log(
+            "Invalid join room data"
+          );
+
+          return;
+        }
+
+        socket.userId = userId;
+        socket.role = role;
+
+        const conversationId =
+          await getOrCreateConversation(
+            farmerId,
+            expertId
+          );
+
+
+        socket.join(roomId);
+
+        socket.data.userId = userId;
+        socket.data.role = role;
+
+        socket.data.conversationId =
+          conversationId;
+
+        socket.data.farmerId =
+          farmerId;
+
+        socket.data.expertId =
+          expertId;
+
+        socket.data.senderId =
+          userId;
+
+        const wasOffline =
+          !isUserOnline(userId);
+
+        addUserSocket(
+          userId,
+          socket.id
+        );
+
+
+        console.log(
+          `Socket ${socket.id} joined room ${roomId}`
+        );
+
+        console.log(
+          "Conversation ID:",
+          conversationId
+        );
+
+        if (wasOffline) {
+
+          io.emit(
+            "user_status",
+            {
+              userId,
+              status: "online",
+              role,
+            }
+          );
+
+          console.log(
+            "Broadcast ONLINE from join_room:",
+            userId
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          "Join room error:",
+          error
+        );
+
+      }
+
+    }
+  );
+
+  socket.on(
+    "send_message",
+    async (messageData) => {
+
+      try {
+
+        const {
+          roomId,
+          sender,
+          senderId,
+          message,
+          image,
+        } = messageData || {};
+
+
+        const cleanedMessage =
+          typeof message === "string"
+            ? message.trim()
+            : "";
+
+
+        const hasText =
+          cleanedMessage.length > 0;
+
+        const hasImage =
+          Boolean(image);
+
+
+        if (
+          !roomId ||
+          !senderId ||
+          (!hasText && !hasImage)
+        ) {
+          return;
+        }
+
+
+        const conversationId =
+          socket.data.conversationId;
+
+
+        if (!conversationId) {
+
+          console.log(
+            "Conversation not found"
+          );
+
+          return;
+        }
+
+        const result =
+          await pool.query(
+            `
+            INSERT INTO messages
+            (
+              conversation_id,
+              sender_id,
+              sender_role,
+              message,
+              image_url
+            )
+
+            VALUES
+            (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5
+            )
+
+            RETURNING
+              id,
+              conversation_id,
+              sender_id,
+              sender_role,
+              message,
+              image_url,
+              created_at
+            `,
+            [
+              conversationId,
+              senderId,
+              sender,
+              cleanedMessage,
+              image || null,
+            ]
+          );
+
+        const savedMessage = result.rows[0];
+
+        io.to(roomId).emit(
+          "receive_message",
+          {
+            id:
+              savedMessage.id,
+
+            sender:
+              savedMessage.sender_role,
+
+            senderId:
+              savedMessage.sender_id,
+
+            message:
+              savedMessage.message,
+
+            imageUrl:
+              savedMessage.image_url,
+
+            conversationId:
+              savedMessage.conversation_id,
+
+            createdAt:
+              savedMessage.created_at,
+          }
+        );
+
+
+        await pool.query(
+          `
+          UPDATE conversations
+
+          SET updated_at = NOW()
+
+          WHERE id = $1
+          `,
+          [
+            conversationId,
+          ]
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Save message error:",
+          error
+        );
+
+      }
+
+    }
+  );
+
+
+  socket.on(
+    "delete_message",
+    async (data) => {
+
+      try {
+
+        const {
+          messageId,
+          roomId,
+        } = data || {};
+
+
+        if (
+          !messageId ||
+          !roomId
+        ) {
+          return;
+        }
+
+
+        const conversationId =
+          socket.data.conversationId;
+
+        const senderId =
+          socket.data.senderId;
+
+        if (
+          !conversationId ||
+          !senderId
+        ) {
+
+          console.log(
+            "Conversation or sender not found"
+          );
+
+          return;
+        }
+
+        const result =
+          await pool.query(
+            `
+            DELETE FROM messages
+
+            WHERE id = $1
+
+              AND conversation_id = $2
+
+              AND sender_id = $3
+
+            RETURNING id
+            `,
+            [
+              messageId,
+              conversationId,
+              senderId,
+            ]
+          );
+
+        if (
+          result.rowCount === 0
+        ) {
+
+          console.log(
+            "Message not found or user is not the sender"
+          );
+
+          return;
+        }
+
+        console.log(
+          "Message deleted:",
+          messageId
+        );
+
+        io.to(roomId).emit(
+          "message_deleted",
+          {
+            messageId,
+          }
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Delete message error:",
+          error
+        );
+      }}
+  );
+
+  socket.on("user_logout", () => {
+  const userId = socket.data.userId;
+
+  console.log("USER LOGOUT:", userId);
+
+  if (!userId) {
+    socket.disconnect(true);
+    return;
+  }
+
+  socket.disconnect(true);
 });
+
+  socket.on(
+    "disconnect",
+    (reason) => {
+
+      const userId = socket.data.userId;
+
+      console.log(
+        "Socket disconnected:",
+        socket.id,
+        "Reason:",
+        reason
+      );
+
+      if (!userId) {
+        return;
+      }
+
+      const becameOffline =
+        removeUserSocket(
+          userId,
+          socket.id
+        );
+
+      if (becameOffline) {
+
+        io.emit(
+          "user_status",
+          {
+            userId,
+            status: "offline",
+          }
+        );
+
+        console.log(
+          "Broadcast OFFLINE:",
+          userId);
+      }});
+});
+
+app.get(
+  "/api/users/:userId/status",
+  (req, res) => {
+
+    const {
+      userId,
+    } = req.params;
+
+    const online =
+      isUserOnline(userId);
+
+    res.json({
+      success: true,
+      userId,
+      online,
+    });
+  });
 
 app.get("/api/experts", async (req, res) => {
   try {
@@ -880,6 +1260,7 @@ app.get(
     }
   }
 );
+
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
