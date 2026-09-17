@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS messages (
         REFERENCES "user"(id)
         ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS market_prices (
+    id SERIAL PRIMARY KEY,
+
+    commodity TEXT NOT NULL,
+
+    min_price NUMERIC(10,2),
+    max_price NUMERIC(10,2),
+
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
   `;
 
   try {
