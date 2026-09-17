@@ -4,31 +4,260 @@ const pool = require("./db");
 require("dotenv").config();
 const db = require("./db");
 const app = express();
-
 app.use(cors());
 app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.json({
-    message: "Smart Agriculture Backend Running",
-  });
+const axios = require("axios");
+const cheerio = require("cheerio");
+const http = require("http");
+const { Server } = require("socket.io");
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
 });
 
-app.get("/db-test", async (req, res) => {
+app.get("/api/dam-prices", async (req, res) => {
   try {
-    const result = await pool.query("SELECT NOW()");
+    const response = await axios.get(
+      "https://market.dam.gov.bd/market_daily_price_report/damweb/damweb/PublicPortal/index.php?L=B"
+    );
+
+    const $ = cheerio.load(response.data);
+
+    const banglaToEnglish = (value) => {
+      return value
+        .replace(/০/g, "0")
+        .replace(/১/g, "1")
+        .replace(/২/g, "2")
+        .replace(/৩/g, "3")
+        .replace(/৪/g, "4")
+        .replace(/৫/g, "5")
+        .replace(/৬/g, "6")
+        .replace(/৭/g, "7")
+        .replace(/৮/g, "8")
+        .replace(/৯/g, "9");
+    };
+
+    const prices = [];
+
+    $(".stockbox").each((index, element) => {
+      const commodity = $(element)
+        .find("a")
+        .first()
+        .text()
+        .trim();
+
+      let priceText = $(element)
+        .clone()
+        .children()
+        .remove()
+        .end()
+        .text()
+        .trim();
+
+      priceText = banglaToEnglish(priceText);
+
+      const match = priceText.match(
+        /([\d.]+)\s*-\s*([\d.]+)/
+      );
+
+      if (commodity && match) {
+        prices.push({
+          commodity,
+          minPrice: Number(match[1]),
+          maxPrice: Number(match[2]),
+        });
+      }
+    });
 
     res.json({
       success: true,
-      message: "PostgreSQL Connected",
-      time: result.rows[0],
+      count: prices.length,
+      prices,
     });
+
   } catch (error) {
-    console.error(error);
+    console.error("DAM Price Error:", error.message);
 
     res.status(500).json({
       success: false,
-      message: "Database connection failed",
+      message: error.message,
+    });
+  }
+});
+
+const getLatestMarketPrices = async () => {
+  const result = await pool.query(`
+    SELECT
+      id,
+      commodity,
+      min_price,
+      max_price,
+      collected_at
+    FROM market_prices
+    ORDER BY commodity ASC
+  `);
+
+  return result.rows;
+};
+
+io.on("connection", async (socket) => {
+  console.log("Client connected:", socket.id);
+
+  try {
+    const prices = await getLatestMarketPrices();
+
+    socket.emit("market_prices", prices);
+  } catch (error) {
+    console.error("Socket Market Price Error:", error.message);
+  }
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
+
+const updateDAMPrices = async () => {
+  try {
+    const response = await axios.get(
+      "https://market.dam.gov.bd/market_daily_price_report/damweb/damweb/PublicPortal/index.php?L=B"
+    );
+
+    const $ = cheerio.load(response.data);
+
+    const banglaToEnglish = (value) => {
+      return value
+        .replace(/০/g, "0")
+        .replace(/১/g, "1")
+        .replace(/২/g, "2")
+        .replace(/৩/g, "3")
+        .replace(/৪/g, "4")
+        .replace(/৫/g, "5")
+        .replace(/৬/g, "6")
+        .replace(/৭/g, "7")
+        .replace(/৮/g, "8")
+        .replace(/৯/g, "9");
+    };
+
+    const prices = [];
+
+    $(".stockbox").each((index, element) => {
+      const commodity = $(element)
+        .find("a")
+        .first()
+        .text()
+        .trim();
+
+      let priceText = $(element)
+        .clone()
+        .children()
+        .remove()
+        .end()
+        .text()
+        .trim();
+
+      priceText = banglaToEnglish(priceText);
+
+      const match = priceText.match(/([\d.]+)\s*-\s*([\d.]+)/);
+
+      if (commodity && match) {
+        prices.push({
+          commodity,
+          minPrice: Number(match[1]),
+          maxPrice: Number(match[2]),
+        });
+      }
+    });
+
+    for (const item of prices) {
+  await pool.query(
+    `INSERT INTO market_prices
+      (commodity, min_price, max_price, collected_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (commodity)
+     DO UPDATE SET
+       min_price = EXCLUDED.min_price,
+       max_price = EXCLUDED.max_price,
+       collected_at = NOW()`,
+    [
+      item.commodity,
+      item.minPrice,
+      item.maxPrice,
+    ]
+  );
+}
+
+    const latestResult = await pool.query(`
+      SELECT DISTINCT ON (commodity)
+        id,
+        commodity,
+        min_price,
+        max_price,
+        collected_at
+      FROM market_prices
+      ORDER BY commodity, collected_at DESC, id DESC
+    `);
+
+    const latestPrices = latestResult.rows;
+
+    io.emit("market_prices", latestPrices);
+
+    console.log(
+      `DAM prices updated successfully: ${prices.length} commodities`
+    );
+
+    return latestPrices;
+  } catch (error) {
+    console.error("Automatic DAM Update Error:", error.message);
+  }
+};
+
+app.post("/api/save-dam-prices", async (req, res) => {
+  try {
+    const prices = await updateDAMPrices();
+
+    res.json({
+      success: true,
+      message: "DAM prices updated successfully",
+      count: prices.length,
+      prices,
+    });
+  } catch (error) {
+    console.error("Save DAM Prices Error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+app.get("/api/market-prices", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (commodity)
+        id,
+        commodity,
+        min_price,
+        max_price,
+        collected_at
+      FROM market_prices
+      ORDER BY commodity, collected_at DESC, id DESC
+    `);
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      prices: result.rows,
+    });
+  } catch (error) {
+    console.error("Market Prices Error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch market prices",
     });
   }
 });
@@ -171,10 +400,7 @@ async function generateDiagnosis(requestData) {
         return response;
       } catch (error) {
         lastError = error;
-        console.error(
-          `Gemini ${model} attempt ${attempt} failed:`,
-          error.message
-        );
+  console.error(`Gemini ${model} attempt ${attempt} failed:`, error.message);
         if (error.status === 429) {
           console.log(`${model} returned 429. Moving to fallback model...`);
           break;
@@ -225,12 +451,10 @@ app.post("/api/diagnose", async (req, res) => {
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     const base64Image = imageBuffer.toString("base64");
 
-    const responseLanguage =
-      language === "bn" ? "Bengali (Bangla)" : "English";
+    const responseLanguage = language === "bn" ? "Bengali (Bangla)" : "English";
 
     const prompt = `
 You are an expert agricultural plant pathologist.
-
 Analyze the provided crop leaf image carefully.
 
 Your tasks:
@@ -324,7 +548,7 @@ The response language is ${responseLanguage}.
     // Save diagnosis result to PostgreSQL
     const dbQuery = `
       INSERT INTO crop_diagnoses 
-      (image_url, language, disease, scientific_name, confidence, symptoms, organic_treatment, chemical_treatment, prevention)
+(image_url, language, disease, scientific_name, confidence, symptoms, organic_treatment, chemical_treatment, prevention)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *;
     `;
@@ -371,8 +595,7 @@ The response language is ${responseLanguage}.
   }
 });
 
-// Fetch saved Crop Diagnosis History
-app.get("/api/diagnose/history", async (req, res) => {
+app.get("/api/diagnose/history", async (req,res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM crop_diagnoses ORDER BY created_at DESC LIMIT 20"
@@ -387,7 +610,6 @@ app.get("/api/diagnose/history", async (req, res) => {
   }
 });
 
-// AI Soil Analysis
 app.post("/api/soil", async (req, res) => {
   try {
     const { imageUrl, language = "bn" } = req.body;
@@ -416,12 +638,10 @@ app.post("/api/soil", async (req, res) => {
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     const base64Image = imageBuffer.toString("base64");
 
-    const responseLanguage =
-      language === "bn" ? "Bengali (Bangla)" : "English";
+    const responseLanguage = language === "bn" ? "Bengali (Bangla)" : "English";
 
     const prompt = `
 You are an expert soil scientist and agricultural chemist.
-
 Analyze the provided image of soil carefully.
 
 Your tasks:
@@ -515,10 +735,9 @@ The response language is ${responseLanguage}.
 
     const soil = JSON.parse(response.text);
 
-    // Save soil analysis result to PostgreSQL
     const dbQuery = `
       INSERT INTO soil_analyses 
-      (image_url, language, soil_type, confidence, estimated_ph, moisture_level, organic_matter_content, suitable_crops, soil_improvements, characteristics)
+(image_url, language, soil_type, confidence, estimated_ph, moisture_level, organic_matter_content, suitable_crops, soil_improvements, characteristics)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *;
     `;
@@ -567,8 +786,7 @@ The response language is ${responseLanguage}.
   }
 });
 
-// Fetch saved Soil Analysis History
-app.get("/api/soil/history", async (req, res) => {
+app.get("/api/soil/history", async (req,res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM soil_analyses ORDER BY created_at DESC LIMIT 20"
@@ -583,7 +801,6 @@ app.get("/api/soil/history", async (req, res) => {
   }
 });
 
-// Weather API
 app.get("/api/weather", async (req, res) => {
   try {
     const city = req.query.city || "Dhaka";
@@ -621,18 +838,6 @@ app.get("/api/weather", async (req, res) => {
   }
 });
 
-const http = require("http");
-const { Server } = require("socket.io");
-
-const server = http.createServer(app);
-
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
-});
-
 const onlineUsers = new Map();
 
 const addUserSocket = (userId, socketId) => {
@@ -646,37 +851,29 @@ const addUserSocket = (userId, socketId) => {
   }
 
   onlineUsers.get(userId).add(socketId);
-  return becameOnline;
-};
+  return becameOnline;};
 const removeUserSocket = (userId, socketId) => {
   if (!userId || !socketId) {
-    return false;
-  }
+    return false;}
 
   const sockets = onlineUsers.get(userId);
  
   if (!sockets) {
-    return false;
-  }
+    return false;}
 
   sockets.delete(socketId);
 
   if (sockets.size === 0) {
     onlineUsers.delete(userId);
 
-    return true;
-  }
-  return false;
-};
+    return true;}
+  return false;};
 
 const isUserOnline = (userId) => {
-  return onlineUsers.has(userId);
-};
+  return onlineUsers.has(userId);};
 
 async function getOrCreateConversation(
-  farmerId,
-  expertId
-) {
+  farmerId, expertId) {
   const result = await pool.query(
     `
     INSERT INTO conversations
@@ -696,21 +893,13 @@ async function getOrCreateConversation(
 
     RETURNING id
     `,
-    [
-      farmerId,
-      expertId,
-    ]
-  );
+    [farmerId, expertId,]);
 
-  return result.rows[0].id;
-}
+  return result.rows[0].id;};
 
 io.on("connection", (socket) => {
 
-  console.log(
-    "Socket connected:",
-    socket.id
-  );
+  console.log("Socket connected:", socket.id);
 
 socket.on("user_online", (data) => {
   const { userId, role } = data || {};
@@ -729,17 +918,14 @@ socket.on("user_online", (data) => {
       userId,
       status: "online",
       role,
-    });
-  }
-});
+    });}});
 
   socket.on("join_room", async (data) => {
   try {
     const { roomId, farmerId, expertId, userId, role } = data || {};
 
     if (!roomId || !farmerId || !expertId || !userId) {
-      return;
-    }
+      return;}
 
     socket.userId = userId;
     socket.role = role;
@@ -764,68 +950,35 @@ socket.on("user_online", (data) => {
   socket.on(
     "send_message",
     async (messageData) => {
-
       try {
+const {roomId, sender, senderId, message, image,} = messageData || {};
 
-        const {
-          roomId,
-          sender,
-          senderId,
-          message,
-          image,
-        } = messageData || {};
+  const cleanedMessage = typeof message === "string" ? message.trim() : "";
 
-        const cleanedMessage =
-          typeof message === "string"
-            ? message.trim()
-            : "";
+   const hasText = cleanedMessage.length > 0;
 
-        const hasText =
-          cleanedMessage.length > 0;
+        const hasImage = Boolean(image);
 
-        const hasImage =
-          Boolean(image);
+      if (!roomId || !senderId || (!hasText && !hasImage)){
+          return;}
 
-        if (
-          !roomId ||
-          !senderId ||
-          (!hasText && !hasImage)
-        ) {
-          return;
-        }
-
-        const conversationId =
-          socket.data.conversationId;
+        const conversationId = socket.data.conversationId;
 
         if (!conversationId) {
+          console.log("Conversation not found");
+          return;}
 
-          console.log(
-            "Conversation not found"
-          );
-
-          return;
-        }
-
-        const result =
-          await pool.query(
+        const result = await pool.query(
             `
             INSERT INTO messages
-            (
-              conversation_id,
+            (conversation_id,
               sender_id,
               sender_role,
               message,
-              image_url
-            )
+              image_url)
 
             VALUES
-            (
-              $1,
-              $2,
-              $3,
-              $4,
-              $5
-            )
+            ($1, $2, $3, $4, $5)
 
             RETURNING
               id,
@@ -842,95 +995,52 @@ socket.on("user_online", (data) => {
               sender,
               cleanedMessage,
               image || null,
-            ]
-          );
+            ]);
 
         const savedMessage = result.rows[0];
 
         io.to(roomId).emit(
           "receive_message",
           {
-            id:
-              savedMessage.id,
-
-            sender:
-              savedMessage.sender_role,
-
-            senderId:
-              savedMessage.sender_id,
-
-            message:
-              savedMessage.message,
-
-            imageUrl:
-              savedMessage.image_url,
-
-            conversationId:
-              savedMessage.conversation_id,
-
-            createdAt:
-              savedMessage.created_at,
-          }
-        );
-
+            id: savedMessage.id,
+            sender: savedMessage.sender_role,
+            senderId: savedMessage.sender_id,
+            message: savedMessage.message,
+            imageUrl: savedMessage.image_url,
+            conversationId: savedMessage.conversation_id,
+            createdAt: savedMessage.created_at,
+          });
 
         await pool.query(
           `
           UPDATE conversations
-
           SET updated_at = NOW()
-
           WHERE id = $1
           `,
-          [
-            conversationId,
-          ]
+          [ conversationId,]
         );
 
       } catch (error) {
-
-        console.error(
-          "Save message error:",
-          error
-        );
-
+        console.error("Save message error:", error);
       }});
 
-  socket.on(
-    "delete_message",
+  socket.on("delete_message",
     async (data) => {
       try {
-        const {
-          messageId,
-          roomId,
-        } = data || {};
+        const {messageId, roomId,} = data || {};
 
-        if (
-          !messageId ||
-          !roomId
-        ) {
-          return;
-        }
+        if (!messageId || !roomId) {
+          return;}
 
-        const conversationId =
-          socket.data.conversationId;
+        const conversationId = socket.data.conversationId;
 
-        const senderId =
-          socket.data.senderId;
+        const senderId = socket.data.senderId;
 
-        if (
-          !conversationId ||
-          !senderId
-        ) {
-          console.log(
-            "Conversation or sender not found"
-          );
+        if (!conversationId || !senderId) {
+          console.log("Conversation or sender not found");
+          return;}
 
-          return;
-        }
-
-        const result =
-          await pool.query(
+        const result = await pool.query(
             `
             DELETE FROM messages
             WHERE id = $1
@@ -938,114 +1048,54 @@ socket.on("user_online", (data) => {
               AND sender_id = $3
             RETURNING id
             `,
-            [
-              messageId,
-              conversationId,
-              senderId,
-            ]
-          );
+        [messageId, conversationId, senderId,]);
 
-        if (
-          result.rowCount === 0
-        ) {
+        if (result.rowCount === 0) {
+          console.log("Message not found or user is not the sender");
+          return;}
 
-          console.log(
-            "Message not found or user is not the sender"
-          );
+        console.log("Message deleted:", messageId);
 
-          return;
-        }
-
-        console.log(
-          "Message deleted:",
-          messageId
-        );
-
-        io.to(roomId).emit(
-          "message_deleted",
-          {
-            messageId,
-          }
-        );
+        io.to(roomId).emit("message_deleted",{ messageId,});
 
       } catch (error) {
-
-        console.error(
-          "Delete message error:",
-          error
-        );
-      }}
-  );
+        console.error("Delete message error:", error);}});
 
   socket.on("user_logout", () => {
   const userId = socket.data.userId;
 
   console.log("USER LOGOUT:", userId);
 
-  if (!userId) {
-    socket.disconnect(true);
-    return;
-  }
+  if (!userId) {socket.disconnect(true);
+    return;}
 
-  socket.disconnect(true);
-});
+  socket.disconnect(true);});
 
-  socket.on(
-    "disconnect",
-    (reason) => {
+  socket.on("disconnect",(reason) => {
 
       const userId = socket.data.userId;
 
-      console.log(
-        "Socket disconnected:",
-        socket.id,
-        "Reason:",
-        reason
-      );
+    console.log("Socket disconnected:", socket.id, "Reason:", reason);
 
       if (!userId) {
-        return;
-      }
+        return;}
 
-      const becameOffline =
-        removeUserSocket(
-          userId,
-          socket.id
-        );
+      const becameOffline = removeUserSocket(userId, socket.id);
 
       if (becameOffline) {
 
-        io.emit(
-          "user_status",
-          {
-            userId,
-            status: "offline",
-          }
-        );
+        io.emit("user_status",
+          {userId, status: "offline",});
 
-        console.log(
-          "Broadcast OFFLINE:",
-          userId);
-      }});
-});
+        console.log("Broadcast OFFLINE:", userId);
+      }});});
 
-app.get(
-  "/api/users/:userId/status",
-  (req, res) => {
+app.get("/api/users/:userId/status", (req, res) => {
+    const {userId,} = req.params;
 
-    const {
-      userId,
-    } = req.params;
+    const online = isUserOnline(userId);
 
-    const online =
-      isUserOnline(userId);
-
-    res.json({
-      success: true,
-      userId,
-      online,
-    });
-  });
+    res.json({success: true, userId, online,});});
 
 app.get("/api/experts", async (req, res) => {
   try {
@@ -1057,10 +1107,7 @@ app.get("/api/experts", async (req, res) => {
       ORDER BY name ASC
     `);
 
-    res.json({
-      success: true,
-      experts: result.rows,
-    });
+    res.json({success: true, experts: result.rows,});
   } catch (error) {
     console.error("Get experts error:", error);
 
@@ -1094,14 +1141,11 @@ app.get("/api/farmers", async (req, res) => {
     });
   }
 });
-app.get(
-  "/api/conversations/:farmerId/:expertId/messages",
+
+app.get("/api/conversations/:farmerId/:expertId/messages",
   async (req, res) => {
     try {
-      const {
-        farmerId,
-        expertId,
-      } = req.params;
+      const {farmerId, expertId,} = req.params;
 
       const result = await pool.query(
         `
@@ -1123,8 +1167,7 @@ app.get(
 
         ORDER BY m.created_at ASC
         `,
-        [farmerId, expertId]
-      );
+        [farmerId, expertId]);
 
       res.json({
         success: true,
@@ -1142,12 +1185,15 @@ app.get(
         message:
           "Failed to fetch chat history",
       });
-    }
-  }
-);
+    }});
 
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+updateDAMPrices();
+
+setInterval(() => {
+  updateDAMPrices();
+}, 60 * 60 * 1000);
