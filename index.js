@@ -824,6 +824,19 @@ app.get("/api/weather", async (req, res) => {
         message: data?.error?.message || "Failed to fetch weather data",
       });
     }
+    const currentWeather = data?.current;
+    const weatherAlerts = data?.alerts?.alert || [];
+
+    const notificationPayload = {
+      city: data.location.name,
+      temp_c: currentWeather.temp_c,
+      condition: currentWeather.condition.text,
+      icon: currentWeather.condition.icon,
+      alerts: weatherAlerts,
+      timestamp: new Date(),
+    };
+
+    io.emit("weather_update", notificationPayload);
     return res.json({
       success: true,
       data,
