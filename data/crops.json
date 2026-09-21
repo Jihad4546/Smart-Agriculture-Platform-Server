@@ -1,0 +1,227 @@
+[
+  {
+    "id": "boro-rice",
+    "name": {
+      "bn": "বোরো ধান / ইরি ধান",
+      "en": "Boro / IRRI Rice"
+    },
+    "category": {
+      "bn": "দানাদার শস্য",
+      "en": "Cereal"
+    },
+    "sowing_months": {
+      "bn": "কার্তিক - অগ্রহায়ণ (নভেম্বর - ডিসেম্বর)",
+      "en": "Nov - Dec"
+    },
+    "harvesting_months": {
+      "bn": "চৈত্র - বৈশাখ (এপ্রিল - মে)",
+      "en": "Apr - May"
+    },
+    "duration_days": "140 - 160",
+    "tips": {
+      "bn": "চারা রোপণের ১৫-২০ দিন পর প্রথম কিস্তির ইউরিয়া সার এবং সুষম সেচ নিশ্চিত করুন।",
+      "en": "Apply first installment of urea 15-20 days after transplanting with adequate irrigation."
+    },
+    "icon": "🌾"
+  },
+  {
+    "id": "aman-rice",
+    "name": {
+      "bn": "রোপা আমন ধান",
+      "en": "Aman Rice"
+    },
+    "category": {
+      "bn": "দানাদার শস্য",
+      "en": "Cereal"
+    },
+    "sowing_months": {
+      "bn": "আষাঢ় - শ্রাবণ (জুলাই - আগস্ট)",
+      "en": "Jul - Aug"
+    },
+    "harvesting_months": {
+      "bn": "কার্তিক - অগ্রহায়ণ (নভেম্বর - ডিসেম্বর)",
+      "en": "Nov - Dec"
+    },
+    "duration_days": "120 - 135",
+    "tips": {
+      "bn": "বন্যা সহনশীল জাত নির্বাচন করুন এবং মাজরা পোকা দমনে আলোক ফাঁদ ব্যবহার করুন।",
+      "en": "Select flood-tolerant varieties and use light traps for stem borer control."
+    },
+    "icon": "🌾"
+  },
+  {
+    "id": "tomato",
+    "name": {
+      "bn": "টমেটো",
+      "en": "Tomato"
+    },
+    "category": {
+      "bn": "সবজি",
+      "en": "Vegetable"
+    },
+    "sowing_months": {
+      "bn": "আশ্বিন - কার্তিক (সেপ্টেম্বর - অক্টোবর)",
+      "en": "Sep - Oct"
+    },
+    "harvesting_months": {
+      "bn": "পৌষ - ফাল্গুন (ডিসেম্বর - ফেব্রুয়ারি)",
+      "en": "Dec - Feb"
+    },
+    "duration_days": "90 - 110",
+    "tips": {
+      "bn": "গাছ কিছুটা বড় হলে বাঁশের খুঁটি দিয়ে সাপোর্ট দিন এবং নাবি ধসা রোগ থেকে বাঁচাতে ফাঙ্গিসাইড স্প্রে করুন।",
+      "en": "Provide bamboo support as plants grow and spray fungicides to prevent late blight."
+    },
+    "icon": "🍅"
+  },
+  {
+    "id": "maize",
+    "name": {
+      "bn": "ভুট্টা",
+      "en": "Maize / Corn"
+    },
+    "category": {
+      "bn": "দানাদার শস্য",
+      "en": "Cereal"
+    },
+    "sowing_months": {
+      "bn": "কার্তিক - অগ্রহায়ণ (অক্টোবর - নভেম্বর)",
+      "en": "Oct - Nov"
+    },
+    "harvesting_months": {
+      "bn": "ফাল্গুন - চৈত্র (মার্চ - এপ্রিল)",
+      "en": "Mar - Apr"
+    },
+    "duration_days": "130 - 150",
+    "tips": {
+      "bn": "ফল আর্মিওয়ার্ম পোকার আক্রমণ রোধে নিয়মিত জমি পর্যবেক্ষণ করুন ও জৈব বালাইনাশক ব্যবহার করুন।",
+      "en": "Monitor fields regularly and use bio-pesticides to control Fall Armyworm."
+    },
+    "icon": "🌽"
+  },
+  {
+    "id": "potato",
+    "name": {
+      "bn": "আলু",
+      "en": "Potato"
+    },
+    "category": {
+      "bn": "সবজি",
+      "en": "Vegetable"
+    },
+    "sowing_months": {
+      "bn": "কার্তিক - অগ্রহায়ণ (অক্টোবর - নভেম্বর)",
+      "en": "Oct - Nov"
+    },
+    "harvesting_months": {
+      "bn": "পৌষ - মাঘ (জানুয়ারি - ফেব্রুয়ারি)",
+      "en": "Jan - Feb"
+    },
+    "duration_days": "80 - 90",
+    "tips": {
+      "bn": "সুনিষ্কাশিত দোআঁশ মাটি আলু চাষের জন্য উত্তম। লেট ব্লাইট রোগ প্রতিরোধে নিয়মিত স্প্রে করুন।",
+      "en": "Well-drained loamy soil is best. Spray regularly to prevent late blight disease."
+    },
+    "icon": "🥔"
+  },
+  {
+    "id": "wheat",
+    "name": {
+      "bn": "গম",
+      "en": "Wheat"
+    },
+    "category": {
+      "bn": "দানাদার শস্য",
+      "en": "Cereal"
+    },
+    "sowing_months": {
+      "bn": "কার্তিক - অগ্রহায়ণ (নভেম্বর - ডিসেম্বর)",
+      "en": "Nov - Dec"
+    },
+    "harvesting_months": {
+      "bn": "ফাল্গুন - চৈত্র (মার্চ - এপ্রিল)",
+      "en": "Mar - Apr"
+    },
+    "duration_days": "100 - 115",
+    "tips": {
+      "bn": "তাপসহনশীল ও ব্লাস্ট রোগ প্রতিরোধী জাত (যেমন: বারি গম ৩৩) চাষ করুন।",
+      "en": "Cultivate heat-tolerant and blast-resistant varieties like BARI Gom 33."
+    },
+    "icon": "🌾"
+  },
+  {
+    "id": "mustard",
+    "name": {
+      "bn": "সরিষা",
+      "en": "Mustard"
+    },
+    "category": {
+      "bn": "তৈলবীজ",
+      "en": "Oilseed"
+    },
+    "sowing_months": {
+      "bn": "আশ্বিন - কার্তিক (অক্টোবর - নভেম্বর)",
+      "en": "Oct - Nov"
+    },
+    "harvesting_months": {
+      "bn": "পৌষ - মাঘ (জানুয়ারি - ফেব্রুয়ারি)",
+      "en": "Jan - Feb"
+    },
+    "duration_days": "75 - 85",
+    "tips": {
+      "bn": "জাবে পোকার আক্রমণ বেশি হলে ছাই ছিটিয়ে দিন বা অনুমোদিত বালাইনাশক প্রয়োগ করুন।",
+      "en": "Apply ash or approved pesticides if aphid infestation is severe."
+    },
+    "icon": "🌼"
+  },
+  {
+    "id": "eggplant",
+    "name": {
+      "bn": "বেগুন",
+      "en": "Eggplant / Brinjal"
+    },
+    "category": {
+      "bn": "সবজি",
+      "en": "Vegetable"
+    },
+    "sowing_months": {
+      "bn": "ভাদ্র - আশ্বিন (সেপ্টেম্বর - অক্টোবর)",
+      "en": "Sep - Oct"
+    },
+    "harvesting_months": {
+      "bn": "অগ্রহায়ণ - বৈশাখ (নভেম্বর - মে)",
+      "en": "Nov - May"
+    },
+    "duration_days": "140 - 180",
+    "tips": {
+      "bn": "ডগা ও ফল ছিদ্রকারী পোকা দমনে ফেরোমোন ফাঁদ ব্যবহার করা সবচেয়ে কার্যকরী।",
+      "en": "Using pheromone traps is most effective to control fruit and shoot borer."
+    },
+    "icon": "🍆"
+  },
+  {
+    "id": "jute",
+    "name": {
+      "bn": "পাট",
+      "en": "Jute"
+    },
+    "category": {
+      "bn": "অর্থকরী ফসল",
+      "en": "Cash Crop"
+    },
+    "sowing_months": {
+      "bn": "ফাল্গুন - চৈত্র (মার্চ - এপ্রিল)",
+      "en": "Mar - Apr"
+    },
+    "harvesting_months": {
+      "bn": "শ্রাবণ - ভাদ্র (জুলাই - আগস্ট)",
+      "en": "Jul - Aug"
+    },
+    "duration_days": "110 - 120",
+    "tips": {
+      "bn": "বীজ বপনের পূর্বে বীজ শোধন করে নিলে ভালো ফলন পাওয়া যায়।",
+      "en": "Seed treatment before sowing gives better yield."
+    },
+    "icon": "🌱"
+  }
+]
