@@ -3,6 +3,7 @@ const cors = require("cors");
 const pool = require("./db");
 require("dotenv").config();
 const db = require("./db");
+const cropsData = require("./data/crops.json");
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -16,6 +17,20 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"],
   },
+});
+
+app.get("/api/crop-calendar", (req, res) => {
+  try {
+    res.status(200).json({
+      success: true,
+      data: cropsData,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
 });
 
 app.get("/api/dam-prices", async (req, res) => {
